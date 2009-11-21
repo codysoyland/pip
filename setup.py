@@ -1,12 +1,17 @@
 import sys
-if sys.platform == 'win32' or 'upload' in sys.argv:
+force_setuptools = False
+if 'upload' in sys.argv or 'develop' in sys.argv:
+    force_setuptools = True
+if sys.platform == 'win32':
+    force_setuptools = True
+if force_setuptools:
     from setuptools import setup
 else:
     from distutils.core import setup
 import os
 
 
-version = '0.6'
+version = "0.6.post1"
 
 doc_dir = os.path.join(os.path.dirname(__file__), 'docs')
 index_filename = os.path.join(doc_dir, 'index.txt')
@@ -39,6 +44,6 @@ setup(name='pip',
       author_email='python-virtualenv@groups.google.com',
       url='http://pip.openplans.org',
       license='MIT',
-      py_modules=['pip'],
+      packages=['pip', 'pip.commands', 'pip.vcs'],
       **kw)
       
