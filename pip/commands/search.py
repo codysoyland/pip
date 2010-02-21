@@ -1,7 +1,6 @@
 import os
 import sys
 import xmlrpclib
-import shelve
 import textwrap
 import time
 import pkg_resources
@@ -18,16 +17,6 @@ class SearchCommand(Command):
     def __init__(self):
         super(SearchCommand, self).__init__()
         self.parser.add_option(
-            '--reindex',
-            dest='reindex',
-            action='store_true',
-            help='Re-index local search cache.')
-        self.parser.add_option(
-            '--direct',
-            dest='direct',
-            action='store_true',
-            help='Search PyPI directly instead local cache.')
-        self.parser.add_option(
             '--index',
             dest='index',
             metavar='URL',
@@ -35,30 +24,17 @@ class SearchCommand(Command):
             help='Base URL of Python Package Index (default %default)')
 
     def run(self, options, args):
-        if options.reindex:
-            action = self.reindex
-        else:
-            action = self.search
-        action(options, args)
-
-    def search(self, options, args):
         if not args:
             print >> sys.stderr, 'ERROR: Missing required argument (search query).'
             return
         query = args[0]
         index_url = options.index
 
-        if options.direct:
-            hits = self.direct_search(query, index_url)
-        else:
-            try:
-                hits = self.local_search(query)
-            except SearchIndexDoesNotExist:
-                return
+        hits = self.search(query, index_url)
 
         self._print_results(hits)
 
-    def direct_search(self, query, index_url):
+    def search(self, query, index_url):
         pypi = xmlrpclib.ServerProxy(index_url)
         pypi_hits = pypi.search({'name': query, 'summary': query}, 'or')
 
@@ -69,24 +45,6 @@ class SearchCommand(Command):
             if hit['name'] not in seen_names:
                 seen_names.append(hit['name'])
                 hits.append(hit)
-        return hits
-
-    def local_search(self, query):
-        if not os.path.exists(self._index_file()):
-            print >> sys.stderr, 'ERROR: Search index does not exist. Run "pip search --reindex" to create it.'
-            raise SearchIndexDoesNotExist
-        if os.path.getmtime(self._index_file()) < time.time() - 2592000:
-            print >> sys.stderr, 'NOTICE: Search index is more than 30 days old. Run "pip search --reindex" to update it.'
-
-        hits = []
-        query = query.lower()
-        db = shelve.open(self._index_file())
-        pkgs = db['search-index']
-        hits = [pkg for pkg in pkgs
-                if query in pkg['name'].lower()
-                or (pkg['summary'] is not None
-                    and query in pkg['summary'].lower())]
-        db.close()
         return hits
 
     def _print_results(self, hits, name_column_width=25):
@@ -108,27 +66,5 @@ class SearchCommand(Command):
                 ('\n' + ' ' * (name_column_width + 5)).join(summary),
             )
             print line
-
-    def _index_file(self):
-        return os.path.join(default_config_dir, 'index.db')
-
-    def reindex(self, options, args):
-        index_url = options.index
-        print 'Downloading and updating local search index...'
-        pypi = xmlrpclib.ServerProxy(index_url)
-        pkgs = pypi.search({})
-        index_file = self._index_file()
-        if not os.path.exists(os.path.dirname(index_file)):
-            os.makedirs(os.path.dirname(index_file))
-        db = shelve.open(index_file)
-        currently_indexed = [pkg['name'] for pkg in db.get('search-index', [])]
-        new_pkg_count = 0
-        for pkg in pkgs:
-            if pkg['name'] not in currently_indexed:
-                new_pkg_count += 1
-        db['search-index'] = pkgs
-        db['version'] = 1
-        db.close()
-        print '%s new packages indexed successfully in "%s"' % (new_pkg_count, index_file)
 
 SearchCommand()
