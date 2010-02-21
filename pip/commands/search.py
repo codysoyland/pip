@@ -120,7 +120,7 @@ class SearchCommand(Command):
         index_file = self._index_file()
         if not os.path.exists(os.path.dirname(index_file)):
             os.makedirs(os.path.dirname(index_file))
-        db = shelve.open(index_file)
+        db = shelve.open(index_file[:-3]) # HACK
         currently_indexed = [pkg['name'] for pkg in db.get('search-index', [])]
         new_pkg_count = 0
         for pkg in pkgs:
