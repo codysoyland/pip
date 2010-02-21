@@ -19,7 +19,8 @@ from pip.log import logger
 from pip.util import display_path, rmtree, format_size
 from pip.util import splitext, ask, backup_dir
 from pip.util import url_to_filename, filename_to_url
-from pip.util import is_url, is_filename, strip_prefix
+from pip.util import is_url, is_filename
+from pip.util import renames, normalize_path, is_framework_layout
 from pip.util import make_path_relative, is_svn_page, file_contents
 from pip.util import has_leading_dir, split_leading_dir
 from pip.util import get_file_content
@@ -253,6 +254,14 @@ execfile(__file__)
                     for dir in vcs.dirnames:
                         if dir in dirs:
                             dirs.remove(dir)
+                    for dir in dirs:
+                        # Don't search in anything that looks like a virtualenv environment
+                        if (os.path.exists(os.path.join(root, dir, 'bin', 'python'))
+                            or os.path.exists(os.path.join(root, dir, 'Scripts', 'Python.exe'))):
+                            dirs.remove(dir)
+                        # Also don't search through tests
+                        if dir == 'test' or dir == 'tests':
+                            dirs.remove(dir)
                     filenames.extend([os.path.join(root, dir)
                                      for dir in dirs])
                 filenames = [f for f in filenames if f.endswith('.egg-info')]
@@ -388,19 +397,19 @@ execfile(__file__)
             if dist.has_metadata('installed-files.txt'):
                 for installed_file in dist.get_metadata('installed-files.txt').splitlines():
                     path = os.path.normpath(os.path.join(pip_egg_info_path, installed_file))
-                    if os.path.exists(path):
-                        paths_to_remove.add(path)
+                    paths_to_remove.add(path)
             if dist.has_metadata('top_level.txt'):
+                if dist.has_metadata('namespace_packages.txt'):
+                    namespaces = dist.get_metadata('namespace_packages.txt')
+                else:
+                    namespaces = []
                 for top_level_pkg in [p for p
                                       in dist.get_metadata('top_level.txt').splitlines()
-                                      if p]:
+                                      if p and p not in namespaces]:
                     path = os.path.join(dist.location, top_level_pkg)
-                    if os.path.exists(path):
-                        paths_to_remove.add(path)
-                    elif os.path.exists(path + '.py'):
-                        paths_to_remove.add(path + '.py')
-                        if os.path.exists(path + '.pyc'):
-                            paths_to_remove.add(path + '.pyc')
+                    paths_to_remove.add(path)
+                    paths_to_remove.add(path + '.py')
+                    paths_to_remove.add(path + '.pyc')
 
         elif dist.location.endswith(easy_install_egg):
             # package installed by easy_install
@@ -420,7 +429,7 @@ execfile(__file__)
                                             'easy-install.pth')
             paths_to_remove.add_pth(easy_install_pth, dist.location)
             # fix location (so we can uninstall links to sources outside venv)
-            paths_to_remove.location = develop_egg_link
+            paths_to_remove.location = normalize_path(develop_egg_link)
 
         # find distutils scripts= scripts
         if dist.has_metadata('scripts') and dist.metadata_isdir('scripts'):
@@ -448,6 +457,13 @@ execfile(__file__)
             self.uninstalled.rollback()
         else:
             logger.error("Can't rollback %s, nothing uninstalled."
+                         % (self.project_name,))
+
+    def commit_uninstall(self):
+        if self.uninstalled:
+            self.uninstalled.commit()
+        else:
+            logger.error("Can't commit %s, nothing uninstalled."
                          % (self.project_name,))
 
     def archive(self, build_dir):
@@ -540,6 +556,8 @@ execfile(__file__)
         f = open(os.path.join(egg_info_dir, 'installed-files.txt'), 'w')
         f.write('\n'.join(new_lines)+'\n')
         f.close()
+        os.remove(record_filename)
+        os.rmdir(temp_location)
 
     def remove_temporary_source(self):
         """Remove the source files from this requirement, if they are marked
@@ -743,8 +761,9 @@ class RequirementSet(object):
     def uninstall(self, auto_confirm=False):
         for req in self.requirements.values():
             req.uninstall(auto_confirm=auto_confirm)
+            req.commit_uninstall()
 
-    def install_files(self, finder, force_root_egg_info=False):
+    def install_files(self, finder, force_root_egg_info=False, bundle=False):
         unnamed = list(self.unnamed_requirements)
         reqs = self.requirements.values()
         while reqs or unnamed:
@@ -790,6 +809,11 @@ class RequirementSet(object):
                     else:
                         req_to_install.run_egg_info()
                 elif install:
+                    ##@@ if filesystem packages are not marked
+                    ##editable in a req, a non deterministic error
+                    ##occurs when the script attempts to unpack the
+                    ##build directory
+                    
                     location = req_to_install.build_location(self.build_dir, not self.is_download)
                     ## FIXME: is the existance of the checkout good enough to use it?  I don't think so.
                     unpack = True
@@ -836,6 +860,9 @@ class RequirementSet(object):
                             f = open(req_to_install.delete_marker_filename, 'w')
                             f.write(DELETE_MARKER_MESSAGE)
                             f.close()
+                            #@@ sketchy way of identifying packages not grabbed from an index
+                            if bundle and req_to_install.url:
+                                self.copy_to_builddir(req_to_install)
                 if not is_bundle and not self.is_download:
                     ## FIXME: shouldn't be globally added:
                     finder.add_dependency_links(req_to_install.dependency_links)
@@ -860,8 +887,18 @@ class RequirementSet(object):
                     req_to_install.remove_temporary_source()
                 if install:
                     self.successfully_downloaded.append(req_to_install)
+                    if bundle and (req_to_install.url and req_to_install.url.startswith('file:///')):
+                        self.copy_to_builddir(req_to_install)
             finally:
                 logger.indent -= 2
+
+    def copy_to_builddir(self, req_to_install):
+        target_dir = req_to_install.editable and self.src_dir or self.build_dir
+        logger.info("Copying %s to %s" %(req_to_install.name, target_dir))
+        dest = os.path.join(target_dir, req_to_install.name)
+        shutil.copytree(req_to_install.source_dir, dest)
+        shutil.copymode(req_to_install.source_dir, dest)
+        call_subprocess(["python", "%s/setup.py"%dest, "clean"])
 
     def unpack_url(self, link, location, only_download=False):
         if only_download:
@@ -874,7 +911,7 @@ class RequirementSet(object):
                 else:
                     vcs_backend.unpack(location)
                 return
-        dir = tempfile.mkdtemp()
+        temp_dir = tempfile.mkdtemp()
         if link.url.lower().startswith('file:'):
             source = url_to_filename(link.url)
             content_type = mimetypes.guess_type(source)[0]
@@ -928,7 +965,7 @@ class RequirementSet(object):
                 ext = os.path.splitext(resp.geturl())[1]
                 if ext:
                     filename += ext
-            temp_location = os.path.join(dir, filename)
+            temp_location = os.path.join(temp_dir, filename)
             fp = open(temp_location, 'wb')
             if md5_hash:
                 download_hash = md5()
@@ -985,6 +1022,7 @@ class RequirementSet(object):
             os.unlink(temp_location)
         if target_file is None:
             os.unlink(temp_location)
+        os.rmdir(temp_dir)
 
     def copy_file(self, filename, location, content_type, link):
         copy = True
@@ -1130,6 +1168,9 @@ class RequirementSet(object):
                     if requirement.conflicts_with and not requirement.install_succeeded:
                         requirement.rollback_uninstall()
                     raise
+                else:
+                    if requirement.conflicts_with and requirement.install_succeeded:
+                        requirement.commit_uninstall()
                 requirement.remove_temporary_source()
         finally:
             logger.indent -= 2
@@ -1333,40 +1374,52 @@ class UninstallPathSet(object):
         self.paths = set()
         self._refuse = set()
         self.pth = {}
-        self.prefix = os.path.normcase(os.path.realpath(restrict_to_prefix))
+        self.prefix = normalize_path(restrict_to_prefix)
         self.dist = dist
-        self.location = dist.location
+        self.location = normalize_path(dist.location)
         self.save_dir = None
         self._moved_paths = []
 
+    def _permitted(self, path):
+        """
+        Return True if the given path is one we are permitted to remove,
+        False otherwise.
+
+        """
+        ok_prefixes = [self.prefix]
+        # Yep, we are special casing the framework layout of MacPython here
+        if is_framework_layout(sys.prefix):
+            for location in ('/Library', '/usr/local'):
+                if path.startswith(location):
+                    ok_prefixes.append(location)
+        return any([path.startswith(prefix) for prefix in ok_prefixes])
+        
     def _can_uninstall(self):
-        prefix, stripped = strip_prefix(self.location, self.prefix)
-        if not stripped:
+        if not self._permitted(self.location):
             logger.notify("Not uninstalling %s at %s, outside environment %s"
-                          % (self.dist.project_name, self.dist.location,
+                          % (self.dist.project_name, self.location,
                              self.prefix))
             return False
         return True
 
     def add(self, path):
-        path = os.path.abspath(path)
+        path = normalize_path(path)
         if not os.path.exists(path):
             return
-        prefix, stripped = strip_prefix(os.path.normcase(path), self.prefix)
-        if stripped:
-            self.paths.add((prefix, stripped))
+        if self._permitted(path):
+            self.paths.add(path)
         else:
-            self._refuse.add((prefix, path))
+            self._refuse.add(path)
 
     def add_pth(self, pth_file, entry):
-        prefix, stripped = strip_prefix(os.path.normcase(pth_file), self.prefix)
-        if stripped:
+        pth_file = normalize_path(pth_file)
+        if self._permitted(pth_file):
             entry = os.path.normcase(entry)
-            if stripped not in self.pth:
-                self.pth[stripped] = UninstallPthEntries(os.path.join(prefix, stripped))
-            self.pth[stripped].add(os.path.normcase(entry))
+            if pth_file not in self.pth:
+                self.pth[pth_file] = UninstallPthEntries(pth_file)
+            self.pth[pth_file].add(entry)
         else:
-            self._refuse.add((prefix, pth_file))
+            self._refuse.add(pth_file)
 
     def compact(self, paths):
         """Compact a path set to contain the minimal number of paths
@@ -1374,15 +1427,11 @@ class UninstallPathSet(object):
         /a/path/to/a/file.txt are both in the set, leave only the
         shorter path."""
         short_paths = set()
-        def sort_set(x, y):
-            prefix_x, path_x = x
-            prefix_y, path_y = y
-            return cmp(len(path_x), len(path_y))
-        for prefix, path in sorted(paths, sort_set):
+        for path in sorted(paths, lambda x, y: cmp(len(x), len(y))):
             if not any([(path.startswith(shortpath) and
                          path[len(shortpath.rstrip(os.path.sep))] == os.path.sep)
-                        for shortprefix, shortpath in short_paths]):
-                short_paths.add((prefix, path))
+                        for shortpath in short_paths]):
+                short_paths.add(path)
         return short_paths
 
     def remove(self, auto_confirm=False):
@@ -1397,22 +1446,22 @@ class UninstallPathSet(object):
             if auto_confirm:
                 response = 'y'
             else:
-                for prefix, path in paths:
-                    logger.notify(os.path.join(prefix, path))
+                for path in paths:
+                    logger.notify(path)
                 response = ask('Proceed (y/n)? ', ('y', 'n'))
             if self._refuse:
                 logger.notify('Not removing or modifying (outside of prefix):')
-                for prefix, path in self.compact(self._refuse):
-                    logger.notify(os.path.join(prefix, path))
+                for path in self.compact(self._refuse):
+                    logger.notify(path)
             if response == 'y':
-                self.save_dir = tempfile.mkdtemp('-uninstall', 'pip-')
-                for prefix, path in paths:
-                    full_path = os.path.join(prefix, path)
-                    new_path = os.path.join(self.save_dir, path)
-                    new_dir = os.path.dirname(new_path)
-                    logger.info('Removing file or directory %s' % full_path)
-                    self._moved_paths.append((prefix, path))
-                    os.renames(full_path, new_path)
+                self.save_dir = tempfile.mkdtemp(suffix='-uninstall',
+                                                 prefix='pip-')
+                for path in paths:
+                    new_path = os.path.splitdrive(path)[1].lstrip(os.path.sep)
+                    new_path = os.path.join(self.save_dir, new_path)
+                    logger.info('Removing file or directory %s' % path)
+                    self._moved_paths.append(path)
+                    renames(path, new_path)
                 for pth in self.pth.values():
                     pth.remove()
                 logger.notify('Successfully uninstalled %s' % self.dist.project_name)
@@ -1426,11 +1475,10 @@ class UninstallPathSet(object):
             logger.error("Can't roll back %s; was not uninstalled" % self.dist.project_name)
             return False
         logger.notify('Rolling back uninstall of %s' % self.dist.project_name)
-        for prefix, path in self._moved_paths:
-            tmp_path = os.path.join(self.save_dir, path)
-            real_path = os.path.join(prefix, path)
-            logger.info('Replacing %s' % real_path)
-            os.renames(tmp_path, real_path)
+        for path in self._moved_paths:
+            tmp_path = os.path.join(self.save_dir, path.lstrip(os.path.sep))
+            logger.info('Replacing %s' % path)
+            renames(tmp_path, path)
         for pth in self.pth:
             pth.rollback()
 

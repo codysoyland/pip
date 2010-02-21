@@ -4,6 +4,24 @@ News for pip
 hg tip
 ------
 
+* Fixed uninstallation on Windows
+
+0.6.3
+-----
+
+* Fixed import error on Windows with regard to the backwards compatibility
+  package
+
+0.6.2
+-----
+
+* Fixed uninstall when /tmp is on a different filesystem.
+
+* Fixed uninstallation of distributions with namespace packages.
+
+0.6.1
+-----
+
 * Added support for the ``https`` and ``http-static`` schemes to the
   Mercurial and ``ftp`` scheme to the Bazaar backend.
 
@@ -11,6 +29,9 @@ hg tip
 
 * Fixed an issue in the package finder that could result in an
   infinite loop while looking for links.
+
+* Fixed issue with ``pip bundle`` and local files (which weren't being
+  copied into the bundle), from Whit Morriss.
 
 0.6
 ---

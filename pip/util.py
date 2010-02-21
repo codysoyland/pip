@@ -16,8 +16,8 @@ __all__ = ['rmtree', 'display_path', 'backup_dir',
            'format_size', 'is_url', 'is_filename',
            'strip_prefix', 'is_svn_page', 'file_contents',
            'split_leading_dir', 'has_leading_dir',
-           'make_path_relative', 'is_framework_layout',
-           'get_file_content']
+           'make_path_relative', 'normalize_path', 'is_framework_layout',
+           'get_file_content', 'renames', 'get_terminal_size']
 
 def rmtree(dir):
     shutil.rmtree(dir, ignore_errors=True,
@@ -190,20 +190,6 @@ def is_filename(name):
         return False
     return True
 
-def strip_prefix(path, prefix):
-    """ If ``path`` begins with ``prefix``, return ``path`` with
-    ``prefix`` stripped off.  Otherwise return None."""
-    prefixes = [prefix]
-    # Yep, we are special casing the framework layout of MacPython here
-    if is_framework_layout(sys.prefix):
-        for location in ('/Library', '/usr/local'):
-            if path.startswith(location):
-                prefixes.append(location)
-    for prefix in prefixes:
-        if path.startswith(prefix):
-            return prefix, path.replace(prefix + os.path.sep, '')
-    return None, None
-
 def is_svn_page(html):
     """Returns true if the page appears to be the index page of an svn repository"""
     return (re.search(r'<title>[^<]*Revision \d+:', html)
@@ -269,11 +255,19 @@ def make_path_relative(path, rel_to):
         return '.' + os.path.sep
     return os.path.sep.join(full_parts)
 
-def is_framework_layout(path):
+def normalize_path(path):
+    """
+    Convert a path to its canonical, case-normalized, absolute version.
+    
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+def is_framework_layout(site_packages_dir):
     """Return True if the current platform is the default Python of Mac OS X
     which installs scripts in /usr/local/bin"""
     return (sys.platform[:6] == 'darwin' and
-            (path[:9] == '/Library/' or path[:16] == '/System/Library/'))
+            (site_packages_dir[:9] == '/Library/' or
+             site_packages_dir[:16] == '/System/Library/'))
 
 _scheme_re = re.compile(r'^(http|https|file):', re.I)
 _url_slash_drive_re = re.compile(r'/*([a-z])\|', re.I)
@@ -307,6 +301,22 @@ def get_file_content(url, comes_from=None):
     content = f.read()
     f.close()
     return url, content
+
+def renames(old, new):
+    """Like os.renames(), but handles renaming across devices."""
+    # Implementation borrowed from os.renames().
+    head, tail = os.path.split(new)
+    if head and tail and not os.path.exists(head):
+        os.makedirs(head)
+
+    shutil.move(old, new)
+
+    head, tail = os.path.split(old)
+    if head and tail:
+        try:
+            os.removedirs(head)
+        except OSError:
+            pass
 
 def get_terminal_size():
     """Returns a tuple (x, y) representing the width(x) and the height(x)
