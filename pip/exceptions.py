@@ -11,6 +11,3 @@ class DistributionNotFound(InstallationError):
 
 class BadCommand(Exception):
     """Raised when virtualenv or a command is not found"""
-
-class SearchIndexDoesNotExist(Exception):
-    """Raised when the pip search index is not found"""

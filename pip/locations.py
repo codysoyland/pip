@@ -23,12 +23,10 @@ if sys.platform == 'win32':
     if not os.path.exists(bin_py):
         bin_py = os.path.join(sys.prefix, 'bin')
     config_dir = os.environ.get('APPDATA', user_dir) # Use %APPDATA% for roaming
-    default_config_dir = os.path.join(config_dir, 'pip')
-    default_config_file = os.path.join(default_config_dir, 'pip.ini')
+    default_config_file = os.path.join(config_dir, 'pip', 'pip.ini')
 else:
     bin_py = os.path.join(sys.prefix, 'bin')
-    default_config_dir = os.path.join(user_dir, '.pip')
-    default_config_file = os.path.join(default_config_dir, 'pip.conf')
+    default_config_file = os.path.join(user_dir, '.pip', 'pip.conf')
     # Forcing to use /usr/local/bin for standard Mac OS X framework installs
     if sys.platform[:6] == 'darwin' and sys.prefix[:16] == '/System/Library/':
         bin_py = '/usr/local/bin'

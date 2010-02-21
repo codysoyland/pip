@@ -5,9 +5,7 @@ import textwrap
 import time
 import pkg_resources
 from pip.basecommand import Command
-from pip.locations import default_config_dir
 from pip.util import get_terminal_size
-from pip.exceptions import SearchIndexDoesNotExist
 
 class SearchCommand(Command):
     name = 'search'
