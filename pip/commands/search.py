@@ -1,8 +1,6 @@
-import os
 import sys
 import xmlrpclib
 import textwrap
-import time
 import pkg_resources
 from pip.basecommand import Command
 from pip.util import get_terminal_size
