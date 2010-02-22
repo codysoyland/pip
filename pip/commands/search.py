@@ -31,7 +31,11 @@ class SearchCommand(Command):
 
         pypi_hits = self.search(query, index_url)
         hits = translate_hits(pypi_hits)
-        print_results(hits)
+
+        terminal_size = get_terminal_size()
+        terminal_width = terminal_size[0]
+
+        print_results(hits, terminal_width=terminal_width)
 
     def search(self, query, index_url):
         pypi = xmlrpclib.ServerProxy(index_url)
@@ -65,26 +69,23 @@ def translate_hits(hits):
     package_list = sorted(packages.values(), lambda x, y: cmp(y['score'], x['score']))
     return package_list
 
-def print_results(hits, name_column_width=25):
+def print_results(hits, name_column_width=25, terminal_width=None):
     installed_packages = [p.project_name for p in pkg_resources.working_set]
-    terminal_size = get_terminal_size()
-    terminal_width = terminal_size[0]
     for hit in hits:
         name = hit['name']
         summary = hit['summary'] or ''
-        summary = textwrap.wrap(summary, terminal_width - name_column_width - 5)
-        installed = name in installed_packages
-        if installed:
-            flag = 'i'
-        else:
-            flag = 'n'
-        line = '%s %s - %s' % (
-            flag,
+        if terminal_width is not None:
+            summary = textwrap.wrap(summary, terminal_width - name_column_width - 5)
+        line = '%s - %s' % (
             name.ljust(name_column_width),
-            ('\n' + ' ' * (name_column_width + 5)).join(summary),
+            ('\n' + ' ' * (name_column_width + 3)).join(summary),
         )
         try:
             print line
+            if name in installed_packages:
+                dist = pkg_resources.get_distribution(name)
+                print '  INSTALLED: %s' % dist.version
+                print '  LATEST: %s' % highest_version(hit['versions'])
         except UnicodeEncodeError:
             pass
 
