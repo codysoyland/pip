@@ -30,7 +30,6 @@ class SearchCommand(Command):
         index_url = options.index
 
         pypi_hits = self.search(query, index_url)
-        import ipdb; ipdb.set_trace()
         hits = translate_hits(pypi_hits)
         print_results(hits)
 
