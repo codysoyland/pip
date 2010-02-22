@@ -32,8 +32,11 @@ class SearchCommand(Command):
         pypi_hits = self.search(query, index_url)
         hits = translate_hits(pypi_hits)
 
-        terminal_size = get_terminal_size()
-        terminal_width = terminal_size[0]
+        if sys.stdout.isatty():
+            terminal_size = get_terminal_size()
+            terminal_width = terminal_size[0]
+        else:
+            terminal_width = None
 
         print_results(hits, terminal_width=terminal_width)
 
@@ -75,11 +78,10 @@ def print_results(hits, name_column_width=25, terminal_width=None):
         name = hit['name']
         summary = hit['summary'] or ''
         if terminal_width is not None:
+            # wrap and indent summary to fit terminal
             summary = textwrap.wrap(summary, terminal_width - name_column_width - 5)
-        line = '%s - %s' % (
-            name.ljust(name_column_width),
-            ('\n' + ' ' * (name_column_width + 3)).join(summary),
-        )
+            summary = ('\n' + ' ' * (name_column_width + 3)).join(summary)
+        line = '%s - %s' % (name.ljust(name_column_width), summary)
         try:
             print line
             if name in installed_packages:
