@@ -295,24 +295,12 @@ Searching for packages
 ----------------------
 
 pip can search the `Python Package Index <http://pypi.python.org/pypi>`_ (PyPI)
-for packages using the ``pip search`` command. It can search PyPI directly, or
-you can build a local search index to enable faster searching. To index all of
-the packages on PyPI, run::
-
-    $ pip search --reindex
-
-This will create a pip-specific search database in :file:`$HOME/.pip/index.db`
-(Unix) or :file:`%HOME%\\pip\\index.db` (Windows). To search the local index,
-run::
+for packages using the ``pip search`` command. To search, run::
 
     $ pip search "query"
 
 The query will be used to search the names and summaries of all packages
 indexed.
-
-To search PyPI directly, bypassing the need of a local search index, run::
-
-    $ pip search --direct "query"
 
 pip searches http://pypi.python.org/pypi by default but alternative indexes
 can be searched by using the ``--index`` flag.
